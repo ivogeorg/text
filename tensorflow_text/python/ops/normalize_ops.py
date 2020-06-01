@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# coding=utf-8
 """Tensorflow lowercasing operation for UTF8 strings."""
 
 from __future__ import absolute_import
@@ -21,6 +22,8 @@ from __future__ import print_function
 
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops.ragged import ragged_conversion_ops
 from tensorflow.python.ops.ragged import ragged_tensor
 
 from tensorflow.python.framework import load_library
@@ -87,3 +90,101 @@ def normalize_utf8(input, normalization_form="NFKC", name=None):
       return input_tensor.with_flat_values(result)
     else:
       return gen_normalize_ops.normalize_utf8(input_tensor, normalization_form)
+
+
+# pylint: disable=redefined-builtin)
+def normalize_utf8_with_offsets_map(input,
+                                    normalization_form="NFKC",
+                                    name=None):
+  """Normalizes each UTF-8 string in the input tensor using the specified rule.
+
+  Returns normalized strings and an offset map used by another operation to map
+  post-normalized string offsets to pre-normalized string offsets.
+
+  See http://unicode.org/reports/tr15/
+
+  Args:
+    input: A `Tensor` or `RaggedTensor` of type string. (Must be UTF-8.)
+      normalization_form: One of the following string values ('NFC', 'NFKC').
+        Default is 'NFKC'.
+    name: The name for this op (optional).
+
+  Returns:
+    A tuple of (results, offset_map) where:
+
+    results: `Tensor` or `RaggedTensor` of type string, with normalized
+      contents.
+    offset_map: `variant` used to map the post-normalized string offsets
+      to pre-normalized string offsets. This is used as an input to
+      `find_source_offsets` op.
+  """
+  with ops.name_scope(name, "NormalizeUTF8WithOffsets", [input]):
+    input_tensor = ragged_tensor.convert_to_tensor_or_ragged_tensor(
+        input, dtype=dtypes.string)
+    if ragged_tensor.is_ragged(input_tensor):
+      result, offset_map = gen_normalize_ops.normalize_utf8_with_offsets_map(
+          input_tensor.flat_values, normalization_form)
+      return input_tensor.with_flat_values(result), offset_map
+    else:
+      return gen_normalize_ops.normalize_utf8_with_offsets_map(
+          input_tensor, normalization_form)
+
+
+# pylint: disable=redefined-builtin)
+def find_source_offsets(offset_map, input_offsets, name=None):
+  """Maps the input post-normalized string offsets to pre-normalized offsets.
+
+  Returns the source (i.e. pre-normalized) string offsets mapped from the input
+  post-normalized string offsets using the input offset_map, which is an output
+  from the `normalize_utf8_with_offsets_map` op.
+
+  For example:
+
+  ```python
+  >>> post_normalized_str, offset_map = normalize_utf8_with_offsets_map(
+  ...                                 ["株式会社",
+  "ＫＡＤＯＫＡＷＡ"])
+  >>> find_source_offsets(offset_map, [[0, 1, 2], [0, 1]])
+  tf.Tensor([[0, 1, 2], [0, 3]], shape=(2, 3), dtype=int64)
+  ```
+
+  Args:
+    offset_map: `variant` used to map the post-normalized string offsets to
+      pre-normalized string offsets. offset_map is an output from
+      `normalize_utf8_with_offsets_map` function.
+    input_offsets: A `Tensor` or `RaggedTensor` of type int64 representing the
+      the post-normalized string offsets,
+    name: The name for this op (optional).
+
+  Returns:
+    results: `Tensor` or `RaggedTensor` of type int64, with pre-normalized
+      string offsets content.
+  """
+
+  with ops.name_scope(name, "FindSourceOffsets", [input_offsets]):
+    input_offsets_tensor = ragged_tensor.convert_to_tensor_or_ragged_tensor(
+        input_offsets, dtype=dtypes.int64)
+
+    if ragged_tensor.is_ragged(input_offsets_tensor):
+      output_values = gen_normalize_ops.find_source_offsets(
+          offset_map=offset_map,
+          input_offsets_values=input_offsets_tensor.flat_values,
+          input_offsets_splits=input_offsets_tensor.nested_row_splits[-1])
+      output_offsets = input_offsets_tensor.with_flat_values(output_values)
+      return output_offsets
+    else:
+      if input_offsets_tensor.shape.ndims > 1:
+        output_offsets = find_source_offsets(
+            offset_map,
+            ragged_conversion_ops.from_tensor(
+                input_offsets_tensor,
+                ragged_rank=input_offsets_tensor.shape.ndims - 1))
+        return ragged_conversion_ops.to_tensor(output_offsets)
+      elif input_offsets_tensor.shape.ndims == 0:
+        output_offsets = find_source_offsets(
+            offset_map, array_ops.expand_dims(input_offsets_tensor, 0))
+        return output_offsets[0]
+      else:
+        output_offsets = find_source_offsets(
+            offset_map, array_ops.expand_dims(input_offsets_tensor, 0))
+        return array_ops.squeeze(output_offsets, [0])

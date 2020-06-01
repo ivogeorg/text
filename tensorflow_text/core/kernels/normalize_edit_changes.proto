@@ -1,0 +1,19 @@
+syntax = "proto2";
+
+package tensorflow.text;
+
+// Protocol buffer representing a vector of edit changes
+// (old_length, new_length) used for serializing a vector of icu::Edits objects
+message NormalizationChanges {
+  // Edit changes for one icu::Edits object
+  message BatchChanges {
+    message Change {
+      optional int32 old_length = 1;
+      optional int32 new_length = 2;
+    }
+
+    repeated Change change = 1;
+  }
+
+  repeated BatchChanges batch_changes = 1;
+}
