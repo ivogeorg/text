@@ -498,6 +498,9 @@ py_test(
 py_library(
     name = "tokenization",
     srcs = ["python/ops/tokenization.py"],
+    deps = [
+        # python/module tensorflow dep,
+    ],
 )
 
 py_tf_text_library(
